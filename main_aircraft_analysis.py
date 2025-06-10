@@ -117,3 +117,104 @@ aircraft_params = {
     # 'isa_tropopause_alt_m': 11000,
     # 'isa_tropopause_temp_K': 216.65,
 }
+
+# ---  Implement Simplified Engine Model Function (thrust_available) ---
+# Reference: Anderson, John D. Jr. "Aircraft Performance and Design." Chapter 3, "Propulsion."
+# Simplified models: Power/Thrust lapse with altitude using density ratio to an exponent.
+# Linear reduction with speed for simplicity.
+def thrust_available(altitude_m, velocity_ms, params):
+    """
+    Calculates the available thrust from the engine based on altitude and velocity.
+    Simplification: Uses simple lapse models for altitude and speed.
+    Args:
+        altitude_m (float): Altitude in meters.
+        velocity_ms (float): True airspeed in m/s.
+        params (dict): Aircraft parameters dictionary.
+    Returns:
+        float: Thrust Available in Newtons.
+    """
+    isa_data = isa_model(altitude_m)
+    rho = isa_data['rho_kgm3']
+    rho_sl = RHO_SL_KGM3 # Use the imported global constant for SL density
+
+    if params['engine_type'] == 'prop':
+        # Propeller engine model (Power Available)
+        PA_sl = params['max_power_sl_W']
+        lapse_factor = (rho / rho_sl)**params['power_lapse_exponent']
+        speed_factor = (1 - params['power_speed_factor'] * velocity_ms)
+        PA = PA_sl * lapse_factor * max(0.0, speed_factor) # Ensure power is not negative
+
+        # Convert power to thrust. Handle very low speeds to avoid division by zero.
+        # For ground roll/static thrust, a minimum non-zero velocity is often used.
+        min_vel_for_thrust = 1.0 # m/s
+        thrust = PA / max(velocity_ms, min_vel_for_thrust)
+        return thrust
+    elif params['engine_type'] == 'jet':
+        # Jet engine model (Thrust Available)
+        TA_sl = params['max_thrust_sl_N']
+        lapse_factor = (rho / rho_sl)**params['thrust_lapse_exponent']
+        speed_factor = (1 - params['thrust_speed_factor'] * velocity_ms)
+        thrust = TA_sl * lapse_factor * max(0.0, speed_factor) # Ensure thrust is not negative
+        return thrust
+    else:
+        raise ValueError("Unknown engine_type. Must be 'jet' or 'prop'.")
+
+
+# --- Implement Simplified Fuel Burn Rate Model Function (fuel_burn_rate) ---
+# Reference: Anderson, John D. Jr. "Aircraft Performance and Design." Chapter 3, "Propulsion."
+# Simplified models: Assumes constant TSFC/SFC with respect to altitude/speed for simplicity.
+def fuel_burn_rate(current_thrust_N, current_velocity_ms, params):
+    """
+    Calculates the fuel burn rate in kg/s.
+    Simplification: Assumes constant TSFC/SFC (no lapse with altitude/speed for simplicity).
+    Args:
+        current_thrust_N (float): Current thrust in Newtons.
+        current_velocity_ms (float): Current true airspeed in m/s.
+        params (dict): Aircraft parameters dictionary.
+    Returns:
+        float: Fuel burn rate in kg/s.
+    """
+    if params['engine_type'] == 'jet':
+        # For jet engines, fuel burn is typically proportional to thrust
+        # F_dot = TSFC * Thrust
+        if 'tsfc_sl_per_sec' not in params:
+             raise ValueError("TSFC parameter missing for jet engine fuel burn calculation.")
+        fuel_dot_kg_s = params['tsfc_sl_per_sec'] * current_thrust_N
+        return fuel_dot_kg_s
+    elif params['engine_type'] == 'prop':
+        # For propeller engines, fuel burn is typically proportional to power
+        # F_dot = SFC * Power, where Power = Thrust * Velocity
+        if 'sfc_sl_per_sec' not in params:
+             raise ValueError("SFC parameter missing for prop engine fuel burn calculation.")
+        # Handle very low speeds for power calculation to avoid issues
+        current_power_W = current_thrust_N * max(current_velocity_ms, 0.1) # Minimum velocity for power calc
+        fuel_dot_kg_s = params['sfc_sl_per_sec'] * current_power_W
+        return fuel_dot_kg_s
+    else:
+        raise ValueError("Unknown engine_type for fuel_burn_rate. Must be 'jet' or 'prop'.")
+
+# --- Main execution block (will be populated in later steps) ---
+if __name__ == "__main__":
+    print("Aircraft Performance Analysis Main Script Initialized\n")
+
+    # Example of how to use isa_model and aircraft_params now:
+    isa_data_sl = isa_model(0)
+    print(f"Sea Level Density from main script: {isa_data_sl['rho_kgm3']:.4f} kg/m^3")
+    print(f"Aircraft Reference Weight: {aircraft_params['weight_ref_N']:.2f} N")
+
+    # Example of using thrust_available and fuel_burn_rate
+    test_altitude = 0 # meters
+    test_velocity = 50 # m/s (approx 100 knots)
+    print(f"\n--- Testing Engine & Fuel Burn Models at {test_altitude}m, {test_velocity}m/s ---")
+
+    try:
+        thrust_output = thrust_available(test_altitude, test_velocity, aircraft_params)
+        print(f"Thrust Available: {thrust_output:.2f} N")
+
+        fuel_burn_output = fuel_burn_rate(thrust_output, test_velocity, aircraft_params)
+        print(f"Fuel Burn Rate: {fuel_burn_output:.6f} kg/s ({fuel_burn_output * 3600:.2f} kg/hr)")
+    except ValueError as e:
+        print(f"Error during engine/fuel burn test: {e}. Please check aircraft_params and engine_type.")
+
+    print("\n--- End of Initial Setup ---\n")
+    # Further analysis steps will go here in subsequent tasks.
